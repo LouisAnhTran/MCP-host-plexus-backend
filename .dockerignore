@@ -1,0 +1,24 @@
+# Secrets — never bake into an image layer
+.env
+
+# Local virtualenv: the image builds its own
+.venv/
+
+# VCS and tooling
+.git/
+.gitignore
+.github/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# Frontend build output if ever present
+dist/
+node_modules/
+
+# Docs — changing the README shouldn't invalidate the build cache
+*.md
+
+.DS_Store
