@@ -8,9 +8,9 @@ from langgraph.prebuilt import create_react_agent
 
 import db
 from config import settings
+from services import mcp_registry
 from services.kb.indexer import make_search_knowledge_base_tool
 from services.prompts import build_system_prompt
-from services.tools import LANGCHAIN_TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -46,22 +46,43 @@ async def run_chat(agent_id: str, messages: list[dict]) -> dict:
 
     agent = dict(agent_row)
 
-    # 1. Build per-request search tool (binds agent_id)
-    search_tool = make_search_knowledge_base_tool(agent_id)
+    # 1. Native tool: knowledge-base search, bound to this agent_id.
+    #    Stays in-process rather than behind MCP because it is agent-scoped by
+    #    construction (the model never sees or supplies the agent id), it reads
+    #    the same database this service owns, and its results feed the
+    #    `references` contract below.
+    tools = []
+    if agent.get("kb_url"):
+        tools.append(make_search_knowledge_base_tool(agent_id))
 
-    # 2. Derive enabled tools from instructions
-    enabled_tool_names = {
-        ins["tool_name"]
-        for ins in (agent.get("instructions") or [])
-        if ins.get("tool_name")
-    }
+    # 2. MCP tools: everything the servers this agent is bound to expose.
+    #    Read from the in-memory cache — no tools/list round trip per turn.
+    server_names = [
+        row["name"]
+        for row in await db.fetch(
+            """
+            SELECT s.name
+              FROM mcp_servers s
+              JOIN agent_mcp_servers ams ON ams.mcp_server_id = s.id
+             WHERE ams.agent_id = $1
+             ORDER BY s.name
+            """,
+            agent_id,
+        )
+    ]
+    mcp_tools = mcp_registry.tools_for(server_names)
+    tools.extend(mcp_tools)
 
-    tools = [search_tool]
-    for name in enabled_tool_names:
-        if name in LANGCHAIN_TOOL_REGISTRY:
-            tools.append(LANGCHAIN_TOOL_REGISTRY[name])
+    logger.info(
+        "agent %s: %d tool(s) — kb=%s, mcp servers=%s",
+        agent["name"],
+        len(tools),
+        bool(agent.get("kb_url")),
+        server_names or "none",
+    )
 
-    # 3. Build system prompt
+    # 3. Build system prompt. It does not enumerate the tools — LangGraph hands
+    #    their schemas to the model, which decides what to call.
     system_prompt = build_system_prompt(agent)
 
     # 4. Create ReAct agent

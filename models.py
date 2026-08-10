@@ -1,30 +1,28 @@
 from pydantic import BaseModel
 
 
-class InstructionItem(BaseModel):
-    instruction_text: str
-    tool_name: str | None = None
-    display_order: int = 0
-
-
 class CreateAgentRequest(BaseModel):
     name: str
+    # Required: every agent has a knowledge base.
     kb_url: str
-    instructions: list[InstructionItem] = []
+    # Optional. Names, not UUIDs: the catalog is seeded from code, so names are
+    # stable and readable, and the frontend already has them from
+    # GET /api/mcp-servers.
+    mcp_server_names: list[str] = []
 
 
 class UpdateAgentRequest(BaseModel):
     name: str
     kb_url: str
-    instructions: list[InstructionItem] = []
+    mcp_server_names: list[str] = []
     reindex: bool = False
 
 
 class AgentResponse(BaseModel):
     id: str
     name: str
-    kb_url: str
-    instructions: list[dict]
+    kb_url: str | None
+    mcp_server_names: list[str]
     status: str
     error_message: str | None
     last_indexed_at: str | None
